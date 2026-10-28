@@ -1,6 +1,7 @@
 // don_ascend - named Valhalla presets, based on C2T's c2t_ascend.
 // Standalone: does not modify the original c2t_ascend preferences or script.
 // A CLI invocation with a profile name is intentionally a LIVE ascension.
+import <don_ascend_prep.ash>
 
 string don_trim(string input) {
     matcher m = create_matcher("^\\s+|\\s+$", input);
@@ -293,7 +294,9 @@ boolean don_run(string name, boolean dry_run) {
         print("DRY RUN: no visits, purchases, perms, ascension, or CLI command.", "green");
         return true;
     }
-    // LIVE ACTIONS BEGIN. Do not assume a valid preset means a legal server-side combo.
+    // LIVE ACTIONS BEGIN. Preflight must pass BEFORE touching Valhalla.
+    if (!prep_list(p)) return false;
+    // Do not assume a valid preset means a legal server-side combo.
     int starting_ascensions = my_ascensions();
     buffer page;
     if (get_property("csServicesPerformed") != "")
