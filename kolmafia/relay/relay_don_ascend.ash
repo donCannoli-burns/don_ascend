@@ -49,7 +49,7 @@ void main() {
             status = "Invalid name: use 1-40 letters, digits, hyphens, underscores; first character must be alphanumeric.";
             error = true;
         } else {
-            string [int] numeric_fields = split_string("type,class,gender,path,moon,deli,armory,perm_mode,karma_hold,skip_starter,trade_decline,trade_archive", ",");
+            string [int] numeric_fields = split_string("type,class,gender,path,moon,deli,armory,perm_mode,karma_hold,skip_starter,trade_decline,trade_archive,auto_approve", ",");
             foreach i, key in numeric_fields
                 profile[key] = don_submitted_value(posted, key);
             profile["perm_skills"] = don_trim(posted["perm_skills"]);
@@ -98,6 +98,9 @@ void main() {
     don_ui_field("Skip starter skills", "skip_starter", don_bool_options(), profile);
     write("</fieldset><fieldset><legend>After leaving Valhalla</legend>");
     don_ui_text("KoLmafia CLI command", "post_command", profile, "Optional single command to run ONLY after a verified new ascension.");
+    write("</fieldset><fieldset><legend>Final ascension approval</legend>");
+    don_ui_field("Approval mode", "auto_approve", don_approval_options(), profile);
+    write("<p class='note'><strong>Auto-on:</strong> YES proceeds immediately, NO cancels, and no response defaults to YES after 30 seconds. <strong>Human-approve on:</strong> requires an explicit YES (no timeout). Both modes include a 5-second final stop window.</p>");
     write("</fieldset><fieldset><legend>Pending trade handling</legend>");
     don_ui_field("Auto-decline trades", "trade_decline", don_bool_options(), profile);
     don_ui_field("Archive trades first", "trade_archive", don_bool_options(), profile);
