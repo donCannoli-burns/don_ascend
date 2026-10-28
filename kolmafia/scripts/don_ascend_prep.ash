@@ -277,6 +277,23 @@ string dap_class_name(int id) {
     return "CLASS ID " + id;
 }
 
+// Resolve Valhalla item IDs using KoLmafia's current item database.
+string dap_astral_label(int id) {
+    if (id == 0) return "none";
+    item selected = to_item(id);
+    if (selected == $item[none]) return "unknown item (#" + id + ")";
+    return selected.to_string() + " (#" + id + ")";
+}
+
+string dap_perm_label(int mode) {
+    if (mode == 0) return "No perming";
+    if (mode == 1) return "Auto-perm softcore";
+    if (mode == 2) return "Auto-perm hardcore";
+    if (mode == 3) return "Selected skills (softcore)";
+    if (mode == 4) return "Selected skills (hardcore)";
+    return "Unknown (#" + mode + ")";
+}
+
 // prep_list{} / prep_list() is the central sequential action+gate list.
 // IMPORTANT: DO NOT call from the Relay editor or --dry-run.
 boolean prep_list(string [string] profile) {
@@ -300,16 +317,28 @@ boolean prep_list(string [string] profile) {
     string type = profile["type"] == "1" ? "Casual" : profile["type"] == "3" ? "Hardcore" : "Normal";
     string gender = profile["gender"] == "1" ? "male" : "female";
     string summary = "ASCENDING INTO " + dap_path_name(profile["path"].to_int()) +
-        " ON " + type + " AS " + dap_class_name(profile["class"].to_int()) +
-        " " + gender + ", BUYING astral item #" + profile["deli"] +
-        " and equipment #" + profile["armory"] +
-        ", perm mode #" + profile["perm_mode"] +
-        ", Karma reserve " + profile["karma_hold"] + ".";
+        " ON " + type + " AS " + dap_class_name(profile["class"].to_int()) + " " + gender +
+        "\nAstral consumable: " + dap_astral_label(profile["deli"].to_int()) +
+        "\nAstral equipment: " + dap_astral_label(profile["armory"].to_int()) +
+        "\nSkill permanence: " + dap_perm_label(profile["perm_mode"].to_int()) +
+        "\nKarma reserve: " + profile["karma_hold"] + ".";
     print("[don_ascend prep] " + summary, "red");
-    if (!user_confirm(summary + "\nApprove the LIVE ascension? NO cancels. After YES you have 30 seconds to use KoLmafia Stop (ESC where supported)."))
-        return dap_stop("Final ascension approval declined.");
-    print("[don_ascend prep] LIVE ASCENSION IN 30 SECONDS. PRESS KoLmafia STOP TO ABORT (ESC WHERE SUPPORTED).", "red");
-    wait(30); // KoLmafia's Stop/ESC must interrupt ASH; explicit approval was required above.
+
+    boolean approved = false;
+    if (profile["auto_approve"] == "1") {
+        // KoLmafia expects MILLISECONDS here: Yes skips waiting, No aborts,
+        // 30 seconds without a choice returns true for unattended ascension.
+        dap_info("AUTO-ON: YES proceeds immediately, NO cancels, or defaults YES after 30 seconds.");
+        approved = user_confirm(summary +
+            "\nAUTO-ON: YES proceeds immediately; NO cancels; no answer defaults YES after 30 seconds.",
+            30000, true);
+    } else {
+        dap_info("HUMAN-APPROVE ON: explicit YES required. NO cancels.");
+        approved = user_confirm(summary + "\nHUMAN-APPROVE: Explicit YES required. NO cancels.");
+    }
+    if (!approved) return dap_stop("Final ascension approval declined.");
+    print("[don_ascend prep] LIVE ASCENSION IN 5 SECONDS. PRESS KoLmafia STOP TO ABORT (ESC WHERE SUPPORTED).", "red");
+    wait(5); // Final interrupt window after a Yes click or 30-second auto-Yes.
     if (!dap_organs_ready() || my_adventures() != 0 || pvp_attacks_left() != 0)
         return dap_stop("State changed during countdown; not ascending.");
     return true;
