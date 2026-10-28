@@ -18,7 +18,7 @@ boolean don_profile_name_ok(string name) {
 }
 
 string [int] don_fields() {
-    return split_string("type,class,gender,path,moon,deli,armory,perm_mode,karma_hold,perm_skills,post_command,skip_starter,trade_decline,trade_archive", ",");
+    return split_string("type,class,gender,path,moon,deli,armory,perm_mode,karma_hold,perm_skills,post_command,skip_starter,trade_decline,trade_archive,auto_approve", ",");
 }
 
 string [string] don_defaults() {
@@ -37,6 +37,8 @@ string [string] don_defaults() {
     p["skip_starter"] = "1";
     p["trade_decline"] = "0";
     p["trade_archive"] = "0";
+    // Older profiles default to explicit human approval.
+    p["auto_approve"] = "0";
     return p;
 }
 
@@ -76,7 +78,7 @@ string don_validate(string [string] p) {
     foreach i, field in fields {
         if (!(p contains field)) return "Missing field: " + field;
     }
-    string [int] numeric_fields = split_string("type,class,gender,path,moon,deli,armory,perm_mode,karma_hold,skip_starter,trade_decline,trade_archive", ",");
+    string [int] numeric_fields = split_string("type,class,gender,path,moon,deli,armory,perm_mode,karma_hold,skip_starter,trade_decline,trade_archive,auto_approve", ",");
     foreach i, field in numeric_fields {
         if (!don_digits(p[field])) return "Expected numeric ID for " + field;
     }
@@ -100,7 +102,7 @@ string don_validate(string [string] p) {
         return "Unknown astral deli item ID (allowed: 5045, 5046, 5139, 10882).";
     if (armory != 0 && (armory < 5028 || armory > 5042))
         return "Unknown astral armory ID (allowed: 5028-5042).";
-    string [int] bool_fields = split_string("skip_starter,trade_decline,trade_archive", ",");
+    string [int] bool_fields = split_string("skip_starter,trade_decline,trade_archive,auto_approve", ",");
     foreach i, field in bool_fields
         if (p[field] != "0" && p[field] != "1") return field + " must be 0 or 1.";
     if (p["post_command"].contains_text("\n") || p["post_command"].contains_text("\r"))
@@ -188,6 +190,14 @@ string [int] don_karma_options() {
 }
 string [int] don_bool_options() {
     string [int] out = {0:"No", 1:"Yes"};
+    return out;
+}
+
+string [int] don_approval_options() {
+    string [int] out = {
+        0:"Human-approve on (explicit YES required)",
+        1:"Auto-on (YES after 30 seconds; NO cancels)"
+    };
     return out;
 }
 
@@ -288,7 +298,8 @@ boolean don_run(string name, boolean dry_run) {
     }
     print("don_ascend [" + name + "] type=" + p["type"] + " path=" + p["path"] +
         " class=" + p["class"] + " gender=" + p["gender"] + " moon=" + p["moon"] +
-        " deli=" + p["deli"] + " armory=" + p["armory"] + " perm=" + p["perm_mode"], "blue");
+        " deli=" + p["deli"] + " armory=" + p["armory"] + " perm=" + p["perm_mode"] +
+        " approval=" + (p["auto_approve"] == "1" ? "auto-on" : "human-approve"), "blue");
     print("Post-ascension CLI: " + (p["post_command"] == "" ? "(none)" : p["post_command"]), "blue");
     if (dry_run) {
         print("DRY RUN: no visits, purchases, perms, ascension, or CLI command.", "green");
