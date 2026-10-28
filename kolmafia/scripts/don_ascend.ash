@@ -44,7 +44,7 @@ boolean don_exists(string name) {
     if (!don_profile_name_ok(name)) return false;
     string [string] db;
     file_to_map(don_store_file(), db);
-    return db contains name + ".type";
+    return (db contains (name + ".type"));
 }
 
 string [string] don_load(string name) {
@@ -83,7 +83,7 @@ string don_validate(string [string] p) {
     int t = p["type"].to_int();
     int c = p["class"].to_int();
     int g = p["gender"].to_int();
-    int path = p["path"].to_int();
+    int path_id = p["path"].to_int();
     int moon = p["moon"].to_int();
     int deli = p["deli"].to_int();
     int armory = p["armory"].to_int();
@@ -92,8 +92,8 @@ string don_validate(string [string] p) {
     if (t < 1 || t > 3) return "Type must be 1 (casual), 2 (normal), or 3 (hardcore).";
     if (c < 1) return "Class ID must be positive.";
     if (g < 1 || g > 2) return "Gender must be 1 (male) or 2 (female).";
-    if (path < 0 || moon < 1 || moon > 9) return "Invalid path or moon sign ID.";
-    if (t == 1 && path != 0) return "Casual ascensions cannot take a challenge path.";
+    if (path_id < 0 || moon < 1 || moon > 9) return "Invalid path or moon sign ID.";
+    if (t == 1 && path_id != 0) return "Casual ascensions cannot take a challenge path.";
     if (mode < 0 || mode > 4) return "Invalid perm mode (0-4).";
     if (hold < 0) return "Karma reserve must be nonnegative.";
     if (deli != 0 && deli != 5045 && deli != 5046 && deli != 5139 && deli != 10882)
