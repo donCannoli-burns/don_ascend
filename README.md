@@ -60,7 +60,7 @@ The **live** `don_ascend NAME` command now runs the following stages, in order. 
 4. Ensure one aerated diving helmet and three each of Boris's bread, roasted vegetable of Jarlsberg, Pete's rich ricotta, roasted vegetable focaccia, plain calzone, and baked veggie ricotta casserole using KoLmafia CLI. This may acquire ingredients and spend Meat.
 5. Purchase available Trophy Hut trophies, one at a time, verifying successful purchase and respecting the 10,000-Meat price. Visit the tavern Suspicious Guy; if no raffle tickets, attempt `raffle 11`; if exactly 11 tickets afterward, attempt `raffle 100`.
 6. Inspect stomach/spleen/liver/adventures/PvP. If anything needs cleanup, ask **Fill organs and burn adventures now?**. When approved, equip `maxorgan`, run `consume all value 3700`, wait 5 seconds and overdrink `bucket of wine` if not already overdrunk, conditionally run `dpills`, `combo`, and `combo watersheep-N` for 1–5 adventures, then attempt local `pvp_mab` and `flogger.ash` only if PvP remains. No PvP interactions are automatic until approved in the cleanup prompt.
-7. Hard-stop unless stomach and spleen are full, liver is **over** the maximum, adventures = 0, PvP fights = 0, and all verified expendable currencies are zero. Display path/difficulty/class/sex/astral purchases/perm configuration, ask for final explicit approval, then wait 30 seconds (KoLmafia Stop aborts; Escape may depend on UI). Recheck state after countdown and only then enter Valhalla.
+7. Hard-stop unless stomach and spleen are full, liver is **over** the maximum, adventures = 0, PvP fights = 0, and all verified expendable currencies are zero. Display path/difficulty/class/sex/astral purchases/perm configuration, show human-readable astral item names plus IDs and apply the saved approval mode. Human-approve on requires an explicit Yes. Auto-on uses a 30-second Yes/No dialog: Yes skips the wait, No cancels, and no response automatically selects Yes after 30 seconds. Both modes then provide a 5-second Stop/ESC window before entering Valhalla; readiness is rechecked.
 
 `don_ascend NAME --dry-run` does **not** visit shops, spend currencies, or perform any prep actions; it previews and validates only the saved profile. Because the workflow performs potentially expensive and irreversible operations, the first live run should be monitored and tested after `verify`. The new helper must be installed alongside the main script.
 
@@ -83,6 +83,18 @@ Use the complete skill dropdown and **Add skill to queue** to construct a comma-
 The optional post-ascension command is passed directly to KoLmafia's `cli_execute(...)`, **after** exiting Valhalla and seeing an increased ascension count. Leave blank to disable. Enter only commands you intentionally trust; do not use `don_ascend` itself as the post-command.
 
 Pending trade auto-decline is **off** by default. If enabled, optionally archive the page of trade offers first. If archive is requested but fails, trade declines stop. Trade operations are mutating; the normal no-trade setting is safest.
+
+## Final approval mode (saved per named profile)
+
+In Relay > **don ascend**, load your profile (for example `sea` or `cs`), change **Final ascension approval > Approval mode**, then **Save profile**. The new `auto_approve` field is per-profile and stored in the existing per-character file. Existing profiles without this field default to **Human-approve on** (0).
+
+- **Human-approve on (0):** no timeout. Requires explicitly clicking Yes. No cancels.
+- **Auto-on (1):** KoLmafia `user_confirm(message, 30000, true)` opens a timed Yes/No dialog. Yes proceeds immediately (without waiting for 30s); No cancels; no response defaults to Yes after 30 seconds.
+- **Both modes:** after Yes (or timed Yes), show a **5-second** KoLmafia Stop/ESC window, recheck organ/adventure/PvP gates, then begin Valhalla. The old 30-second post-prompt wait is removed.
+
+The final prompt displays the **names and numeric IDs** of the saved astral consumable and astral equipment, plus the path, difficulty, class, sex, skill permanence mode, and reserved Karma. Item names come from the installed KoLmafia item database.
+
+**CAUTION:** Auto-on explicitly authorizes an unattended, irreversible ascension if all preflight checks pass. The timed dialog is designed for KoLmafia's graphical UI; headless/terminal operation may behave differently. It does not skip the earlier organ-cleanup approval. `don_ascend NAME --dry-run` remains fully non-mutating and never opens confirmation.
 
 ## Safety and limitations
 
