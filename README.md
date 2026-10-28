@@ -1,4 +1,47 @@
-# c2t_ascend
+# don_ascend — named Valhalla presets
+
+This fork bundles the original C2Talon `c2t_ascend` (unchanged) and a new `don_ascend` with separate per-character named profiles and a KoLmafia Relay editor.
+
+## Install via KoLmafia's CLI
+
+```text
+git checkout https://github.com/donCannoli-burns/don_ascend.git master
+```
+
+If this fork was already checked out, update it with:
+
+```text
+git update donCannoli-burns-don_ascend-master
+```
+
+KoLmafia's `manifest.json` installs the contents of `kolmafia/`: `scripts/don_ascend.ash` and `relay/relay_don_ascend.ash` alongside the existing C2T scripts. You do **not** need to unzip anything. If you also have the separate upstream C2T checkout installed, remove that duplicate checkout first to avoid two installations providing the same `c2t_ascend.ash` filename.
+
+## Configure and run named profiles
+
+Open the KoLmafia Relay Browser, refresh the `-run script-` dropdown if needed, and select **don ascend**. Select or manually override a choice for path, difficulty (casual/normal/hardcore), sex/gender, class, moon sign, astral deli and armory purchases, skill perm mode, and Karma reserve. You can choose individual skill IDs from the dropdown or enter a comma-separated list manually. Set an optional KoLmafia CLI command to run after a verified reincarnation. Save each preset under a name such as `sea`, `sea-pm`, or `cs`.
+
+```text
+verify don_ascend
+verify relay_don_ascend
+don_ascend list
+don_ascend show sea
+don_ascend sea --dry-run
+don_ascend sea
+don_ascend sea-pm
+don_ascend cs
+```
+
+**Safety:** Saving a Relay preset, `show`, `list` and `--dry-run` do not enter Valhalla. Calling `don_ascend NAME` **does** attempt to ascend, buy astral items, perm skills and leave Valhalla. The optional saved post-command is executed only after checking that a new ascension was registered. The script does not fully verify that every class/path/sign selection is valid for the current character. Check choices before a live run.
+
+**Testing:** Offline static source-structure checks passed. The new ASH has not yet been compiled or live-tested against an active KoLmafia session. Run both `verify` commands and dry-run before depending on it.
+
+## Original C2T ascender (bundled unchanged)
+
+The following section describes the legacy `c2t_ascend` functionality. Its original upstream installation instructions refer to C2Talon's separate repository; **the install command for this fork is above**.
+
+---
+
+### c2t_ascend
 
 Kolmafia script written in ASH to automate valhalla, to include entering valhalla, buying astral items, perming skills, and leaving valhalla.
 
