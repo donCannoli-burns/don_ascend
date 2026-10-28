@@ -44,6 +44,9 @@ don_ascend show sea
 don_ascend sea --dry-run
 don_ascend sea
 
+don_ascend status
+don_ascend resume sea
+
 don_ascend sea-pm
 don_ascend cs
 ```
@@ -96,13 +99,27 @@ The final prompt displays the **names and numeric IDs** of the saved astral cons
 
 **CAUTION:** Auto-on explicitly authorizes an unattended, irreversible ascension if all preflight checks pass. The timed dialog is designed for KoLmafia's graphical UI; headless/terminal operation may behave differently. It does not skip the earlier organ-cleanup approval. `don_ascend NAME --dry-run` remains fully non-mutating and never opens confirmation.
 
+## Recovery after a new-life choice redirect
+
+KoLmafia can redirect a successful \`afterlife.php?action=ascend\` into \`choice.php?forceoption=0\`. This is **not proof of failure**; some paths require a new-life choice before post-ascension processing completes. The script never automatically chooses an option or retries the ascension.
+
+The runner writes \`data/don_ascend_handoff_<playerID>.txt\` **before** submitting the final reincarnation request, recording the preset, starting ascension count, intended path/class, and a snapshot of the post-ascension CLI command.
+
+- \`don_ascend status\` is a non-mutating local handoff report.
+- If a choice is pending, inspect it in Relay and resolve it manually. **Do not blindly choose option 1.**
+- After resolving the choice, run \`don_ascend resume sea\` (substitute the saved name). It refreshes character status, confirms exactly one additional ascension and the expected path/class, then runs the snapshotted post-command **at most once**.
+- If verification fails, it makes **no additional ascension attempt and no post-command attempt**. Do not rerun \`don_ascend sea\` to recover.
+- For at-most-once semantics, the runner persists \`post_command_claimed\` **before** calling \`cli_execute\`. If the command fails or its outcome is unknown, it will **not** auto-retry; investigate manually.
+
+**Important limitation:** This checkpoint cannot retroactively cover ascensions performed with older versions of the script. For a prior run that printed \`Could not verify that Valhalla was exited\`, first inspect \`ash my_ascensions()\`, \`ash my_path()\`, and \`ash handling_choice()\`. If the new ascension happened, manually resolve its starting choice. Then inspect the saved preset with \`don_ascend show NAME\` and decide whether its post-command still needs to be executed. Do **not** run the original ascension command a second time.
+
 ## Safety and limitations
 
 - The form **does not** execute or ascend; CLI `don_ascend NAME` does.
 - A dry-run validates fields and displays the profile, but does **not** validate whether KoL will allow the chosen path/class/sign combination, whether a skill is actually available in the permery, or whether you can afford astral purchases.
 - Casually ascending with a nonzero challenge path is rejected before action. Other path-specific restrictions depend on the game server.
 - First-live run: check `verify don_ascend` and `verify relay_don_ascend`, inspect `don_ascend show NAME` and `don_ascend NAME --dry-run`; test after finishing the current run. Verify the actual reincarnation and command behavior before relying on it unattended.
-- The script tries to confirm a new life with `main.php` and a rise in `my_ascensions()`. If KoLmafia cannot verify that, **it skips the post-command**, even if the ascension may actually have succeeded.
+- The runner verifies a new ascension using `refresh_status()`, ascension-count increment, expected path and class, and an absence of pending choice; redirects are handled by the durable handoff/resume path rather than immediately treating unexpected HTML as failure.
 - A server-side failure partway through Valhalla may require manual recovery; there is no rollback of purchases or skill perms.
 - There is no auto-generated preset: `sea`, `sea-pm`, and `cs` are examples and must each be saved explicitly.
 - The original C2T script and its data are not changed by this add-on.
