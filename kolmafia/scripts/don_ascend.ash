@@ -314,11 +314,21 @@ void don_handoff_status() {
     print("Handoff status=" + receipt["status"] + " profile=" + receipt["profile"] +
         " ascensions before=" + receipt["ascensions_before"] + " current=" + my_ascensions() +
         " path expected=" + receipt["expected_path"] + " current=" + my_path().id +
+        " class expected=" + receipt["expected_class"] + " current=" + my_class().id +
         " choice active=" + handling_choice(), "blue");
     if (receipt["status"] == "awaiting_verification")
-        print("Resolve pending choices in Relay, then use: don_ascend resume " + receipt["profile"], "blue");
+        print("If a choice is pending, resolve it in Relay (sea choice #1564 can be handled by resume). Then use: don_ascend resume " + receipt["profile"], "blue");
     if (receipt["status"] == "post_command_claimed")
         print("Post-command outcome is potentially ambiguous. Do not auto-retry.", "red");
+}
+// Sea path #55 has a one-button start choice and a one-button Council choice.
+// Set KoLmafia's exact numeric preference keys; never set choiceAdventure#1564.
+void don_sea_choice_defaults(string expected_path) {
+    if (expected_path != "55") return;
+    if (get_property("choiceAdventure1564") != "1")
+        set_property("choiceAdventure1564", "1");
+    if (get_property("choiceAdventure1565") != "1")
+        set_property("choiceAdventure1565", "1");
 }
 boolean don_handoff_resume(string name) {
     string [string] receipt = don_handoff_read();
@@ -334,26 +344,58 @@ boolean don_handoff_resume(string name) {
         print("Handoff status " + receipt["status"] + " is not automatically retryable.", "red");
         return false;
     }
-    if (handling_choice()) {
-        print("Choice #" + last_choice() + " is active. Finish it manually in Relay first. Do not rerun ascension.", "red");
-        return false;
-    }
-    if (!refresh_status()) {
-        print("Status refresh failed. No post-command. Ascension remains uncertain.", "red");
-        return false;
-    }
-    if (handling_choice()) {
-        print("A choice remains active after refresh. Finish it manually in Relay.", "red");
-        return false;
-    }
+    don_sea_choice_defaults(receipt["expected_path"]);
     int before = receipt["ascensions_before"].to_int();
-    if (my_ascensions() != before + 1 ||
-        my_path().id != receipt["expected_path"].to_int() ||
-        my_class().id != receipt["expected_class"].to_int()) {
-        print("New life NOT verified: ascensions " + before + " -> " + my_ascensions() +
+    int stable_reads = 0;
+    boolean sea_choice_submitted = false;
+    // Poll only character status (never afterlife.php), for at most 18 seconds.
+    // Require two matching status reads to avoid the new-life refresh race.
+    for attempt from 1 to 6 {
+        waitq(3);
+        if (handling_choice()) {
+            int active_choice = last_choice();
+            // Only one known new-life choice is eligible, and only one submission.
+            // All other choices stay human-owned.
+            if (receipt["expected_path"] != "55" || active_choice != 1564 || sea_choice_submitted) {
+                print("Choice #" + active_choice + " is active. Finish it in Relay first; do not rerun ascension.", "red");
+                return false;
+            }
+            string [int] options = available_choice_options();
+            if (count(options) != 1 || !(options contains 1)) {
+                print("Sea choice #1564 no longer has exactly option 1; refusing automatic choice.", "red");
+                return false;
+            }
+            sea_choice_submitted = true; // set BEFORE the potentially mutating request
+            print("Sea new-life choice #1564: selecting the only available option (1) ONCE.", "blue");
+            buffer choice_reply = run_choice(1);
+            if (choice_reply == "".to_buffer()) {
+                print("Sea choice reply inconclusive; no repeat submission. Inspect Relay and resume.", "red");
+                return false;
+            }
+            stable_reads = 0;
+        }
+        if (!refresh_status()) {
+            stable_reads = 0;
+            continue;
+        }
+        if (handling_choice()) {
+            stable_reads = 0;
+            continue;
+        }
+        if (my_ascensions() == before + 1 &&
+            my_path().id == receipt["expected_path"].to_int() &&
+            my_class().id == receipt["expected_class"].to_int()) {
+            stable_reads = stable_reads + 1;
+            if (stable_reads >= 2) break;
+        } else {
+            stable_reads = 0;
+        }
+    }
+    if (stable_reads < 2) {
+        print("New life not yet stably verified: ascensions " + before + " -> " + my_ascensions() +
             ", path " + my_path().id + " vs " + receipt["expected_path"] +
             ", class " + my_class().id + " vs " + receipt["expected_class"] +
-            ". No post-command and NO ascension retry.", "red");
+            ". Receipt retained; no post-command and NO ascension retry. Use status/resume later.", "red");
         return false;
     }
     string cmd = don_trim(receipt["post_command"]);
@@ -445,6 +487,7 @@ boolean don_run(string name, boolean dry_run) {
     if (p["armory"].to_int() > 0)
         visit_url("afterlife.php?action=buyarmory&whichitem=" + p["armory"], true, true);
     if (!don_perm_skills(p)) return false;
+    don_sea_choice_defaults(p["path"]);
     if (!don_handoff_begin(name, p, starting_ascensions)) {
         print("Failed to save reincarnation checkpoint; stopping IN Valhalla.", "red");
         return false;
@@ -453,21 +496,14 @@ boolean don_run(string name, boolean dry_run) {
     page = visit_url("afterlife.php?pwd&action=ascend&confirmascend=1&whichsign=" + p["moon"] +
         "&gender=" + p["gender"] + "&whichclass=" + p["class"] + "&whichpath=" + p["path"] +
         "&asctype=" + p["type"] + "&nopetok=1&noskillsok=1&lamesignok=1&lamepathok=1", true, true);
-    // A redirect to choice.php may be the EXPECTED result of reincarnation.
-    // Do not visit main.php or retry afterlife.php. Pending choices are human-owned.
-    if (handling_choice()) {
-        print("HANDOFF PENDING: new-run choice #" + last_choice() +
-            ". Resolve it in Relay, then run: don_ascend resume " + name +
-            ". Never rerun don_ascend " + name + ".", "red");
-        return true;
-    }
-    if (page == "".to_buffer() || page.contains_text("confirmascend")) {
-        print("Afterlife reply inconclusive. Receipt saved; no retry. Check state with " +
-            "don_ascend status, then don_ascend resume " + name + ".", "red");
-        return true;
-    }
+    // A redirect or even an inconclusive reply is not proof of failure.
+    // Verify with bounded status polling, never with another afterlife request.
+    // The sole automatic new-life choice is sea #1564, option 1.
+    if (page == "".to_buffer() || page.contains_text("confirmascend"))
+        print("Afterlife reply inconclusive; checking new-life status without retrying ascend.", "blue");
     if (!don_handoff_resume(name)) {
-        print("Exit not yet verified. Receipt saved; resume once server/new-run choice settles.", "red");
+        print("Exit not yet verified or a choice needs Relay. Receipt saved; run don_ascend status / resume " +
+            name + ". Never repeat the original ascension request.", "red");
         return true;
     }
     return true;
