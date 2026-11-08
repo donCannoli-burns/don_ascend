@@ -314,11 +314,101 @@ void don_handoff_status() {
     print("Handoff status=" + receipt["status"] + " profile=" + receipt["profile"] +
         " ascensions before=" + receipt["ascensions_before"] + " current=" + my_ascensions() +
         " path expected=" + receipt["expected_path"] + " current=" + my_path().id +
+        " class expected=" + receipt["expected_class"] + " current=" + my_class().id +
         " choice active=" + handling_choice(), "blue");
-    if (receipt["status"] == "awaiting_verification")
-        print("Resolve pending choices in Relay, then use: don_ascend resume " + receipt["profile"], "blue");
+    if (receipt["status"] == "awaiting_verification") {
+        if (don_digits(receipt["ascensions_before"]) &&
+            my_ascensions() > receipt["ascensions_before"].to_int() + 1)
+            print("STALE HANDOFF: current ascensions exceed the one-run verification window. " +
+                "Do not resume or rerun Valhalla. Review and use: don_ascend archive-stale " + receipt["profile"], "red");
+        else
+            print("If a choice is pending, resolve it in Relay (sea choice #1564 can be handled by resume). Then use: don_ascend resume " + receipt["profile"], "blue");
+    }
+    if (receipt["status"] == "archived_stale")
+        print("Old receipt archived. Its saved post-command will NEVER run; a NEW live ascension still requires normal preflight.", "blue");
     if (receipt["status"] == "post_command_claimed")
         print("Post-command outcome is potentially ambiguous. Do not auto-retry.", "red");
+}
+// Explicit cleanup using read-only character status and local receipt files.
+// A saved post-command cannot be attributed to the present life after >1 ascent.
+// Never run that command, make a choice, or submit a Valhalla request here.
+boolean don_handoff_archive_stale(string name) {
+    string [string] receipt = don_handoff_read();
+    if (receipt["status"] != "awaiting_verification" || receipt["profile"] != name) {
+        print("No matching pending handoff to archive.", "red");
+        return false;
+    }
+    if (!don_digits(receipt["ascensions_before"])) {
+        print("Invalid starting ascension count in receipt; manual review required.", "red");
+        return false;
+    }
+    int before = receipt["ascensions_before"].to_int();
+    if (handling_choice() || !refresh_status()) {
+        print("A choice is active or character status is unavailable. Do not archive yet.", "red");
+        return false;
+    }
+    int current = my_ascensions();
+    if (current <= before + 1) {
+        print("Receipt is not provably stale: " + before + " -> " + current +
+            ". Resolve the current handoff instead.", "red");
+        return false;
+    }
+    waitq(1);
+    if (!refresh_status() || handling_choice() || my_ascensions() != current) {
+        print("Second status check disagreed or a choice is pending. No archive.", "red");
+        return false;
+    }
+    if (!user_confirm("Archive stale handoff '" + name + "' (" + before + " -> " + current +
+        ")? The saved post-command will be SKIPPED, not executed. This does NOT ascend.")) {
+        print("Stale archive cancelled.", "blue");
+        return false;
+    }
+    if (!refresh_status() || handling_choice() || my_ascensions() != current) {
+        print("Character state changed during confirmation. No archive.", "red");
+        return false;
+    }
+    string archive_file = "don_ascend_handoff_archive_" + my_id() + "_" +
+        before + "_" + current + ".txt";
+    receipt["status"] = "archived_stale";
+    receipt["archived_at_ascensions"] = current.to_string();
+    receipt["archive_reason"] = "current ascensions exceed expected one-run handoff";
+    string [string] existing;
+    if (!file_to_map(archive_file, existing)) {
+        print("Cannot inspect existing archive file. Refusing overwrite.", "red");
+        return false;
+    }
+    if (count(existing) > 0 &&
+        (existing["status"] != "archived_stale" ||
+         existing["profile"] != receipt["profile"] ||
+         existing["ascensions_before"] != receipt["ascensions_before"] ||
+         existing["expected_path"] != receipt["expected_path"] ||
+         existing["post_command"] != receipt["post_command"])) {
+        print("An unrelated archive already has this name. Refusing overwrite.", "red");
+        return false;
+    }
+    if (count(existing) == 0 && !map_to_file(receipt, archive_file)) {
+        print("Could not save the archived receipt; original remains active.", "red");
+        return false;
+    }
+    if (!map_to_file(receipt, don_handoff_file())) {
+        print("Archived copy exists, but active receipt could not be marked. No new ascension allowed.", "red");
+        return false;
+    }
+    print("Stale handoff archived to data/" + archive_file +
+        ". No Valhalla request, choice, or saved post-command was executed.", "green");
+    print("Inspect don_ascend show " + name + " and don_ascend " + name +
+        " --dry-run before any separate, NEW live ascension.", "blue");
+    return true;
+}
+
+// Sea path #55 has a one-button start choice and a one-button Council choice.
+// Set KoLmafia's exact numeric preference keys; never set choiceAdventure#1564.
+void don_sea_choice_defaults(string expected_path) {
+    if (expected_path != "55") return;
+    if (get_property("choiceAdventure1564") != "1")
+        set_property("choiceAdventure1564", "1");
+    if (get_property("choiceAdventure1565") != "1")
+        set_property("choiceAdventure1565", "1");
 }
 boolean don_handoff_resume(string name) {
     string [string] receipt = don_handoff_read();
@@ -334,26 +424,90 @@ boolean don_handoff_resume(string name) {
         print("Handoff status " + receipt["status"] + " is not automatically retryable.", "red");
         return false;
     }
-    if (handling_choice()) {
-        print("Choice #" + last_choice() + " is active. Finish it manually in Relay first. Do not rerun ascension.", "red");
-        return false;
-    }
-    if (!refresh_status()) {
-        print("Status refresh failed. No post-command. Ascension remains uncertain.", "red");
-        return false;
-    }
-    if (handling_choice()) {
-        print("A choice remains active after refresh. Finish it manually in Relay.", "red");
+    if (!don_digits(receipt["ascensions_before"])) {
+        print("Invalid ascension count in receipt. Refusing resume.", "red");
         return false;
     }
     int before = receipt["ascensions_before"].to_int();
-    if (my_ascensions() != before + 1 ||
-        my_path().id != receipt["expected_path"].to_int() ||
-        my_class().id != receipt["expected_class"].to_int()) {
-        print("New life NOT verified: ascensions " + before + " -> " + my_ascensions() +
+    // Reject obsolete receipts before touching choice preferences or game state.
+    if (my_ascensions() > before + 1) {
+        print("STALE HANDOFF (" + before + " -> " + my_ascensions() +
+            "): resume is forbidden. Review and use don_ascend archive-stale " + name, "red");
+        return false;
+    }
+    don_sea_choice_defaults(receipt["expected_path"]);
+    int stable_reads = 0;
+    boolean sea_choice_submitted = false;
+    // Poll only character status (never afterlife.php), for at most 18 seconds.
+    // Require two matching status reads to avoid the new-life refresh race.
+    for attempt from 1 to 6 {
+        waitq(3);
+        if (my_ascensions() > before + 1) {
+            print("Stale handoff detected during verification; no choice or post-command.", "red");
+            return false;
+        }
+        if (handling_choice()) {
+            if (my_ascensions() != before + 1) {
+                print("New-life count is not confirmed; resolve choice manually in Relay.", "red");
+                return false;
+            }
+            int active_choice = last_choice();
+            // Only one known new-life choice is eligible, and only one submission.
+            // All other choices stay human-owned.
+            if (receipt["expected_path"] != "55" || active_choice != 1564 || sea_choice_submitted) {
+                print("Choice #" + active_choice + " is active. Finish it in Relay first; do not rerun ascension.", "red");
+                return false;
+            }
+            string [int] options = available_choice_options();
+            if (count(options) != 1 || !(options contains 1)) {
+                print("Sea choice #1564 no longer has exactly option 1; refusing automatic choice.", "red");
+                return false;
+            }
+            // Persist the claim BEFORE submission, even if the response is lost.
+            if (receipt["sea_choice_1564_claimed"] == "1") {
+                print("Sea choice #1564 was already submitted or its reply was ambiguous. Resolve manually.", "red");
+                return false;
+            }
+            receipt["sea_choice_1564_claimed"] = "1";
+            if (!map_to_file(receipt, don_handoff_file())) {
+                print("Could not save choice claim; no choice submitted.", "red");
+                return false;
+            }
+            sea_choice_submitted = true;
+            print("Sea new-life choice #1564: selecting the only available option (1) ONCE.", "blue");
+            buffer choice_reply = run_choice(1);
+            if (choice_reply == "".to_buffer()) {
+                print("Sea choice reply inconclusive; no repeat submission. Inspect Relay and resume.", "red");
+                return false;
+            }
+            stable_reads = 0;
+        }
+        if (!refresh_status()) {
+            stable_reads = 0;
+            continue;
+        }
+        if (my_ascensions() > before + 1) {
+            print("Stale handoff detected after refresh; no post-command.", "red");
+            return false;
+        }
+        if (handling_choice()) {
+            stable_reads = 0;
+            continue;
+        }
+        if (my_ascensions() == before + 1 &&
+            my_path().id == receipt["expected_path"].to_int() &&
+            my_class().id == receipt["expected_class"].to_int()) {
+            stable_reads = stable_reads + 1;
+            if (stable_reads >= 2) break;
+        } else {
+            stable_reads = 0;
+        }
+    }
+    if (stable_reads < 2) {
+        print("New life not yet stably verified: ascensions " + before + " -> " + my_ascensions() +
             ", path " + my_path().id + " vs " + receipt["expected_path"] +
             ", class " + my_class().id + " vs " + receipt["expected_class"] +
-            ". No post-command and NO ascension retry.", "red");
+            ". Receipt retained; no post-command and NO ascension retry. Use status/resume later.", "red");
         return false;
     }
     string cmd = don_trim(receipt["post_command"]);
@@ -405,7 +559,8 @@ boolean don_run(string name, boolean dry_run) {
     }
     // An unresolved handoff must NEVER be treated as a fresh ascension request.
     string [string] prior = don_handoff_read();
-    if (prior["status"] != "" && prior["status"] != "completed") {
+    if (prior["status"] != "" && prior["status"] != "completed" &&
+        prior["status"] != "archived_stale") {
         print("Unresolved " + prior["status"] + " handoff for '" + prior["profile"] +
             "'. Use don_ascend status / don_ascend resume " + prior["profile"] +
             ". Do not rerun Valhalla.", "red");
@@ -445,6 +600,7 @@ boolean don_run(string name, boolean dry_run) {
     if (p["armory"].to_int() > 0)
         visit_url("afterlife.php?action=buyarmory&whichitem=" + p["armory"], true, true);
     if (!don_perm_skills(p)) return false;
+    don_sea_choice_defaults(p["path"]);
     if (!don_handoff_begin(name, p, starting_ascensions)) {
         print("Failed to save reincarnation checkpoint; stopping IN Valhalla.", "red");
         return false;
@@ -453,21 +609,14 @@ boolean don_run(string name, boolean dry_run) {
     page = visit_url("afterlife.php?pwd&action=ascend&confirmascend=1&whichsign=" + p["moon"] +
         "&gender=" + p["gender"] + "&whichclass=" + p["class"] + "&whichpath=" + p["path"] +
         "&asctype=" + p["type"] + "&nopetok=1&noskillsok=1&lamesignok=1&lamepathok=1", true, true);
-    // A redirect to choice.php may be the EXPECTED result of reincarnation.
-    // Do not visit main.php or retry afterlife.php. Pending choices are human-owned.
-    if (handling_choice()) {
-        print("HANDOFF PENDING: new-run choice #" + last_choice() +
-            ". Resolve it in Relay, then run: don_ascend resume " + name +
-            ". Never rerun don_ascend " + name + ".", "red");
-        return true;
-    }
-    if (page == "".to_buffer() || page.contains_text("confirmascend")) {
-        print("Afterlife reply inconclusive. Receipt saved; no retry. Check state with " +
-            "don_ascend status, then don_ascend resume " + name + ".", "red");
-        return true;
-    }
+    // A redirect or even an inconclusive reply is not proof of failure.
+    // Verify with bounded status polling, never with another afterlife request.
+    // The sole automatic new-life choice is sea #1564, option 1.
+    if (page == "".to_buffer() || page.contains_text("confirmascend"))
+        print("Afterlife reply inconclusive; checking new-life status without retrying ascend.", "blue");
     if (!don_handoff_resume(name)) {
-        print("Exit not yet verified. Receipt saved; resume once server/new-run choice settles.", "red");
+        print("Exit not yet verified or a choice needs Relay. Receipt saved; run don_ascend status / resume " +
+            name + ". Never repeat the original ascension request.", "red");
         return true;
     }
     return true;
@@ -476,12 +625,21 @@ boolean don_run(string name, boolean dry_run) {
 void main(string args) {
     string arg = don_trim(args);
     if (arg == "" || arg == "help") {
-        print("Usage: don_ascend list | status | resume NAME | show NAME | NAME --dry-run | NAME", "blue");
+        print("Usage: don_ascend list | status | resume NAME | archive-stale NAME | show NAME | NAME --dry-run | NAME", "blue");
         print("CAUTION: don_ascend NAME performs live ascension. Create profiles via Relay > don_ascend.", "red");
         return;
     }
     if (arg == "status") {
         don_handoff_status();
+        return;
+    }
+    if (arg.starts_with("archive-stale ")) {
+        string pending_name = don_trim(arg.substring(length("archive-stale ")));
+        if (!don_profile_name_ok(pending_name)) {
+            print("Invalid archive profile name.", "red");
+            return;
+        }
+        don_handoff_archive_stale(pending_name);
         return;
     }
     if (arg.starts_with("resume ")) {

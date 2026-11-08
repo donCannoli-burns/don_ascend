@@ -46,6 +46,7 @@ don_ascend sea
 
 don_ascend status
 don_ascend resume sea
+don_ascend archive-stale sea-pm  # only for a provably obsolete receipt
 
 don_ascend sea-pm
 don_ascend cs
@@ -83,7 +84,7 @@ Perm mode:
 
 Use the complete skill dropdown and **Add skill to queue** to construct a comma-separated list of skill IDs, or enter it manually. For modes 3/4, a missing/unavailable selected skill or inadequate Karma stops the script **in Valhalla**, before reincarnation. Starter-skill skipping only affects auto modes. The Karma reserve can be manually specified (default `0`).
 
-The optional post-ascension command is passed directly to KoLmafia's `cli_execute(...)`, **after** exiting Valhalla and seeing an increased ascension count. Leave blank to disable. Enter only commands you intentionally trust; do not use `don_ascend` itself as the post-command.
+The optional post-ascension command is passed directly to KoLmafia's `cli_execute(...)`, **only after** two separate status refreshes confirm the new ascension count, expected path/class, and no pending known choice. Leave blank to disable. Enter only commands you intentionally trust; do not use `don_ascend` itself as the post-command.
 
 Pending trade auto-decline is **off** by default. If enabled, optionally archive the page of trade offers first. If archive is requested but fails, trade declines stop. Trade operations are mutating; the normal no-trade setting is safest.
 
@@ -101,17 +102,59 @@ The final prompt displays the **names and numeric IDs** of the saved astral cons
 
 ## Recovery after a new-life choice redirect
 
-KoLmafia can redirect a successful \`afterlife.php?action=ascend\` into \`choice.php?forceoption=0\`. This is **not proof of failure**; some paths require a new-life choice before post-ascension processing completes. The script never automatically chooses an option or retries the ascension.
+KoLmafia can redirect a successful `afterlife.php?action=ascend` into `choice.php?forceoption=0`. This is **not proof of failure**. The runner records a durable handoff receipt **before** the one irreversible reincarnation request, then performs bounded verification. It **never sends that ascension request again**.
 
-The runner writes \`data/don_ascend_handoff_<playerID>.txt\` **before** submitting the final reincarnation request, recording the preset, starting ascension count, intended path/class, and a snapshot of the post-ascension CLI command.
+For sea path #55 (11,037 Leagues Under the Sea), the script enforces KoLmafia's exact numeric preferences `choiceAdventure1564=1` (Under the Sea) and `choiceAdventure1565=1` (Council). This happens immediately before reincarnation and again during recovery, to cover preferences that were reset or changed. It does not touch these preferences for other paths.
 
-- \`don_ascend status\` is a non-mutating local handoff report.
-- If a choice is pending, inspect it in Relay and resolve it manually. **Do not blindly choose option 1.**
-- After resolving the choice, run \`don_ascend resume sea\` (substitute the saved name). It refreshes character status, confirms exactly one additional ascension and the expected path/class, then runs the snapshotted post-command **at most once**.
-- If verification fails, it makes **no additional ascension attempt and no post-command attempt**. Do not rerun \`don_ascend sea\` to recover.
-- For at-most-once semantics, the runner persists \`post_command_claimed\` **before** calling \`cli_execute\`. If the command fails or its outcome is unknown, it will **not** auto-retry; investigate manually.
+The **only choice the handoff will submit itself** is #1564, and only when KoLmafia reports the choice as active, the receipt expects sea path #55, the ascension count is **exactly one above** the saved starting count, and the available choices contain **exactly one option: 1**. Before calling `run_choice(1)`, it saves a durable `sea_choice_1564_claimed=1` field. This prevents a later resume from repeating an ambiguously submitted choice. If the reply is empty or ambiguous, or any other choice is active, it stops for manual Relay inspection. A stale receipt cannot select a choice. Choice #1565 is handled by KoLmafia choice preferences, not submitted by this recovery function. Choice #1565 is configured for normal KoLmafia choice automation, not explicitly submitted by the handoff.
 
-**Important limitation:** This checkpoint cannot retroactively cover ascensions performed with older versions of the script. For a prior run that printed \`Could not verify that Valhalla was exited\`, first inspect \`ash my_ascensions()\`, \`ash my_path()\`, and \`ash handling_choice()\`. If the new ascension happened, manually resolve its starting choice. Then inspect the saved preset with \`don_ascend show NAME\` and decide whether its post-command still needs to be executed. Do **not** run the original ascension command a second time.
+After the reincarnation POST or a manual `resume`, the script waits up to **18 seconds**, performing character-status refreshes at 3-second intervals; two consecutive matching observations are required before the snapshotted post-command may run. A still-active choice, inconsistent ascension count, wrong path/class, or refresh failure does not trigger another ascension or post-command.
+
+- `don_ascend status` is a non-mutating local handoff report, including expected/current path and class and an explicit stale-receipt warning.
+- `don_ascend resume sea-pm` uses the existing receipt and checks the new-life state again. It does **not** start another ascension. A receipt that predates two or more ascensions is refused before any sea-choice setting or saved post-command. Use the saved profile name for other profiles.
+- `don_ascend archive-stale sea-pm` is the explicit cleanup path for an obsolete receipt. It does **not** ascend and will never run that receipt's saved post-command.
+- If an unknown choice remains, finish it manually in Relay and resume again. Do not blindly submit a choice other than validated #1564.
+- Once a new life is confirmed, the saved post-command is durably marked `post_command_claimed` **before** execution; if it fails or its result is uncertain, the command is **not** automatically repeated.
+
+### Recovering a stale sea-pm handoff (351 -> 355)
+
+If the status reports `ascensions before=351 current=355 path expected=55 current=0 choice active=false`, the old receipt is **not** a pending single-ascension handoff: four ascensions have occurred since its starting count. `resume` must not run the old `call sea_start.ash` in the current life, and repeating `don_ascend sea-pm` must not cause another Valhalla attempt while this receipt is unresolved.
+
+With the revised branch installed, use:
+
+```text
+verify don_ascend
+don_ascend status
+don_ascend show sea-pm
+don_ascend sea-pm --dry-run
+don_ascend archive-stale sea-pm
+don_ascend status
+```
+
+The archival command requires a matching pending receipt, two successful fresh status checks that agree on a count **greater than** `ascensions_before + 1`, no active choice, explicit human confirmation, and one final stable status refresh. It archives the original receipt to `data/don_ascend_handoff_archive_<playerID>_<before>_<current>.txt` and marks the active receipt `archived_stale`. If archiving fails or evidence is ambiguous, the old lock remains. The archived record preserves the frozen post-command for audit but **never executes it**. No KoL gameplay action is part of archiving.
+
+Only after that archive succeeds may a **separate, intentional** new `don_ascend sea-pm` run enter preflight. Because this example profile has `auto_approve=1`, the live command can ultimately authorize an irreversible new ascension; do not run it merely to test the fix. A dry-run is safe.
+
+**Important:** This section documents the open draft PR branch `fix/sea-handoff-settle-1564-20261029`. A normal `git update` of `master` does not install the new `archive-stale` command until the PR is merged. Run `verify don_ascend` after installing the updated script and review the draft before merging.
+
+### Verifying an existing pending sea-pm handoff
+
+For a receipt showing `ascensions before=351 current=352 path expected=55 current=55`, the ascension count and path look consistent, but the saved expected class must also match. First update the script, then run:
+
+```text
+set choiceAdventure1564 = 1
+set choiceAdventure1565 = 1
+verify don_ascend
+don_ascend status
+don_ascend resume sea-pm
+don_ascend status
+```
+
+`resume` can execute the previously frozen post-command **once** if verification passes; inspect the saved receipt/post-command and complete any pending Relay choice before using it. **Never run `don_ascend sea-pm` again to recover this ascension.**
+
+**Static testing expectations (no live ascension required):** verify both ASH scripts, confirm `don_ascend sea-pm --dry-run` does not set properties or contact KoL, confirm an unresolved receipt blocks a new `don_ascend sea-pm`, and review the status/receipt transitions for matched identity, wrong class, unknown choice, `post_command_claimed`, stale count, archive collision, failed archive writes, and a previously claimed sea choice. These are suggested checks, not a claim of completed live tests.
+
+**Historical limitation:** a pre-receipt version that printed `Could not verify that Valhalla was exited` cannot be recovered automatically. Check `ash my_ascensions()`, `ash my_path()`, `ash my_class()`, and `ash handling_choice()` first and resolve any new-life choice manually. Inspect `don_ascend show NAME` to decide whether a manual post-command is still needed. Never re-send the ascension command.
 
 ## Safety and limitations
 
@@ -119,7 +162,7 @@ The runner writes \`data/don_ascend_handoff_<playerID>.txt\` **before** submitti
 - A dry-run validates fields and displays the profile, but does **not** validate whether KoL will allow the chosen path/class/sign combination, whether a skill is actually available in the permery, or whether you can afford astral purchases.
 - Casually ascending with a nonzero challenge path is rejected before action. Other path-specific restrictions depend on the game server.
 - First-live run: check `verify don_ascend` and `verify relay_don_ascend`, inspect `don_ascend show NAME` and `don_ascend NAME --dry-run`; test after finishing the current run. Verify the actual reincarnation and command behavior before relying on it unattended.
-- The runner verifies a new ascension using `refresh_status()`, ascension-count increment, expected path and class, and an absence of pending choice; redirects are handled by the durable handoff/resume path rather than immediately treating unexpected HTML as failure.
+- The runner verifies a new ascension with two matching `refresh_status()` observations, ascension-count increment, expected path and class, and no active choice. It handles only a proven single-option #1564 sea-start choice automatically; other choices remain manual.
 - A server-side failure partway through Valhalla may require manual recovery; there is no rollback of purchases or skill perms.
 - There is no auto-generated preset: `sea`, `sea-pm`, and `cs` are examples and must each be saved explicitly.
 - The original C2T script and its data are not changed by this add-on.
