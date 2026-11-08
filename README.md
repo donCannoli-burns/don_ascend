@@ -46,6 +46,7 @@ don_ascend sea
 
 don_ascend status
 don_ascend resume sea
+don_ascend archive-stale sea-pm  # only for a provably obsolete receipt
 
 don_ascend sea-pm
 don_ascend cs
@@ -105,14 +106,36 @@ KoLmafia can redirect a successful `afterlife.php?action=ascend` into `choice.ph
 
 For sea path #55 (11,037 Leagues Under the Sea), the script enforces KoLmafia's exact numeric preferences `choiceAdventure1564=1` (Under the Sea) and `choiceAdventure1565=1` (Council). This happens immediately before reincarnation and again during recovery, to cover preferences that were reset or changed. It does not touch these preferences for other paths.
 
-The **only choice the handoff will submit itself** is #1564, and only when KoLmafia reports the choice as active, the saved receipt expects sea path #55, and the available choices contain **exactly one option: 1**. It calls `run_choice(1)` **at most once** for that receipt invocation. If the reply is empty or ambiguous, or any other choice is active, it stops for manual Relay inspection and never repeats a potentially submitted choice. Choice #1565 is configured for normal KoLmafia choice automation, not explicitly submitted by the handoff.
+The **only choice the handoff will submit itself** is #1564, and only when KoLmafia reports the choice as active, the receipt expects sea path #55, the ascension count is **exactly one above** the saved starting count, and the available choices contain **exactly one option: 1**. Before calling `run_choice(1)`, it saves a durable `sea_choice_1564_claimed=1` field. This prevents a later resume from repeating an ambiguously submitted choice. If the reply is empty or ambiguous, or any other choice is active, it stops for manual Relay inspection. A stale receipt cannot select a choice. Choice #1565 is handled by KoLmafia choice preferences, not submitted by this recovery function. Choice #1565 is configured for normal KoLmafia choice automation, not explicitly submitted by the handoff.
 
 After the reincarnation POST or a manual `resume`, the script waits up to **18 seconds**, performing character-status refreshes at 3-second intervals; two consecutive matching observations are required before the snapshotted post-command may run. A still-active choice, inconsistent ascension count, wrong path/class, or refresh failure does not trigger another ascension or post-command.
 
-- `don_ascend status` is a non-mutating local handoff report, now including the expected and current class.
-- `don_ascend resume sea-pm` uses the existing receipt and checks the new-life state again. It does **not** start another ascension. Use the saved profile name for other profiles.
+- `don_ascend status` is a non-mutating local handoff report, including expected/current path and class and an explicit stale-receipt warning.
+- `don_ascend resume sea-pm` uses the existing receipt and checks the new-life state again. It does **not** start another ascension. A receipt that predates two or more ascensions is refused before any sea-choice setting or saved post-command. Use the saved profile name for other profiles.
+- `don_ascend archive-stale sea-pm` is the explicit cleanup path for an obsolete receipt. It does **not** ascend and will never run that receipt's saved post-command.
 - If an unknown choice remains, finish it manually in Relay and resume again. Do not blindly submit a choice other than validated #1564.
 - Once a new life is confirmed, the saved post-command is durably marked `post_command_claimed` **before** execution; if it fails or its result is uncertain, the command is **not** automatically repeated.
+
+### Recovering a stale sea-pm handoff (351 -> 355)
+
+If the status reports `ascensions before=351 current=355 path expected=55 current=0 choice active=false`, the old receipt is **not** a pending single-ascension handoff: four ascensions have occurred since its starting count. `resume` must not run the old `call sea_start.ash` in the current life, and repeating `don_ascend sea-pm` must not cause another Valhalla attempt while this receipt is unresolved.
+
+With the revised branch installed, use:
+
+```text
+verify don_ascend
+don_ascend status
+don_ascend show sea-pm
+don_ascend sea-pm --dry-run
+don_ascend archive-stale sea-pm
+don_ascend status
+```
+
+The archival command requires a matching pending receipt, two successful fresh status checks that agree on a count **greater than** `ascensions_before + 1`, no active choice, explicit human confirmation, and one final stable status refresh. It archives the original receipt to `data/don_ascend_handoff_archive_<playerID>_<before>_<current>.txt` and marks the active receipt `archived_stale`. If archiving fails or evidence is ambiguous, the old lock remains. The archived record preserves the frozen post-command for audit but **never executes it**. No KoL gameplay action is part of archiving.
+
+Only after that archive succeeds may a **separate, intentional** new `don_ascend sea-pm` run enter preflight. Because this example profile has `auto_approve=1`, the live command can ultimately authorize an irreversible new ascension; do not run it merely to test the fix. A dry-run is safe.
+
+**Important:** This section documents the open draft PR branch `fix/sea-handoff-settle-1564-20261029`. A normal `git update` of `master` does not install the new `archive-stale` command until the PR is merged. Run `verify don_ascend` after installing the updated script and review the draft before merging.
 
 ### Verifying an existing pending sea-pm handoff
 
@@ -129,7 +152,7 @@ don_ascend status
 
 `resume` can execute the previously frozen post-command **once** if verification passes; inspect the saved receipt/post-command and complete any pending Relay choice before using it. **Never run `don_ascend sea-pm` again to recover this ascension.**
 
-**Static testing expectations (no live ascension required):** verify both ASH scripts, confirm `don_ascend sea-pm --dry-run` does not set properties or contact KoL, confirm an unresolved receipt blocks a new `don_ascend sea-pm`, and manually review the status/receipt transitions for matched identity, wrong class, unknown choice, and `post_command_claimed`. These are suggested checks; they are not a claim of completed live tests.
+**Static testing expectations (no live ascension required):** verify both ASH scripts, confirm `don_ascend sea-pm --dry-run` does not set properties or contact KoL, confirm an unresolved receipt blocks a new `don_ascend sea-pm`, and review the status/receipt transitions for matched identity, wrong class, unknown choice, `post_command_claimed`, stale count, archive collision, failed archive writes, and a previously claimed sea choice. These are suggested checks, not a claim of completed live tests.
 
 **Historical limitation:** a pre-receipt version that printed `Could not verify that Valhalla was exited` cannot be recovered automatically. Check `ash my_ascensions()`, `ash my_path()`, `ash my_class()`, and `ash handling_choice()` first and resolve any new-life choice manually. Inspect `don_ascend show NAME` to decide whether a manual post-command is still needed. Never re-send the ascension command.
 
